@@ -197,7 +197,7 @@ function questionsToText(qs) {
   }).join("\n\n");
 }
 (function importFromHash() {
-  const m = location.hash.match(/^#q=(.+)$/);
+  const m = location.hash.match(/^#q=(.+)$/) || location.search.match(/[?&]q=([^&]+)/);
   if (!m) return;
   try {
     const json = decodeURIComponent(escape(atob(decodeURIComponent(m[1]))));
