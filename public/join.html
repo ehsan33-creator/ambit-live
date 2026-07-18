@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Join — Ambit Live</title>
 <link rel="stylesheet" href="/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ambit">
+<meta name="theme-color" content="#1E7A62">
 <style>
   .wrap{max-width:460px}
   .code-input{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.18em;text-align:center;font-size:20px}
@@ -65,5 +70,6 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/student.js"></script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
 </body>
 </html>
