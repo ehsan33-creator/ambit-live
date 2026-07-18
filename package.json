@@ -1,0 +1,19 @@
+{
+  "name": "ambit-live",
+  "version": "1.0.0",
+  "description": "Ambit Live — real-time classroom quiz sessions. Teachers host, students join with a code from any device.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "bots": "node test/bots.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.19.0",
+    "socket.io": "^4.7.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.0"
+  }
+}

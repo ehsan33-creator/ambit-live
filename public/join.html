@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Join — Ambit Live</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+<style>
+  .wrap{max-width:460px}
+  .code-input{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.18em;text-align:center;font-size:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand" style="justify-content:center"><div class="brand-mark">A</div><div class="brand-name">Ambit</div><span class="tag">Live</span></div>
+
+  <!-- join form -->
+  <section id="sp-join" class="card stack">
+    <h1 style="font-size:21px;text-align:center">Join your class</h1>
+    <div>
+      <label class="lbl" for="code">Session code</label>
+      <input class="field code-input" id="code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
+    </div>
+    <div>
+      <label class="lbl" for="nick">Your name or nickname</label>
+      <input class="field" id="nick" maxlength="24" autocomplete="off" placeholder="e.g. Aina">
+    </div>
+    <button class="btn btn-primary btn-block" id="joinBtn">Join session</button>
+    <p class="muted center" style="margin:0" id="joinErr"></p>
+  </section>
+
+  <!-- waiting -->
+  <section id="sp-wait" class="card center" hidden>
+    <h2 style="font-size:19px">You're in, <span id="waitNick"></span>! 🎉</h2>
+    <p class="muted" id="waitTitle"></p>
+    <div class="spin" aria-hidden="true"></div>
+    <p class="muted">Waiting for your teacher to start…</p>
+  </section>
+
+  <!-- question -->
+  <section id="sp-q" class="card" hidden>
+    <div class="run-meta">
+      <span class="pill pill-accent" id="sqNum">Q1</span>
+      <span class="pill pill-neutral" id="sScore">0 pts</span>
+      <span class="timer" id="sTimer">–</span>
+    </div>
+    <div class="q-text" id="sqText" style="font-size:17px"></div>
+    <div id="sOpts"></div>
+    <div id="sTypedWrap" hidden>
+      <input class="field" id="sTyped" placeholder="Type your answer…" autocomplete="off">
+      <button class="btn btn-primary btn-block" id="sSubmit" style="margin-top:10px">Submit answer</button>
+    </div>
+    <div class="feed" id="sFeed"></div>
+  </section>
+
+  <!-- final -->
+  <section id="sp-end" class="card" hidden>
+    <h2 style="font-size:19px;text-align:center">Session complete 🏁</h2>
+    <div class="big-score" id="endScore">0</div>
+    <p class="muted center" id="endRank"></p>
+    <div id="endReview"></div>
+  </section>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/student.js"></script>
+</body>
+</html>

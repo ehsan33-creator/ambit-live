@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambit Live — Host a session</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><div class="brand-mark">A</div><div class="brand-name">Ambit</div><span class="tag">Live</span></div>
+
+  <!-- ============ SETUP ============ -->
+  <section id="ph-setup">
+    <h1 style="font-size:26px">Host a live session</h1>
+    <p style="color:var(--ink-2);margin:6px 0 20px;max-width:60ch">Paste your questions, pick your settings, and share the code — students join from any phone in seconds, no accounts needed.</p>
+    <div class="grid2">
+      <div class="card stack">
+        <div>
+          <label class="lbl" for="title">Session title</label>
+          <input class="field" id="title" placeholder="e.g. Sejarah Tingkatan 5 Bab 1: Kedaulatan Negara" maxlength="120">
+        </div>
+        <div>
+          <label class="lbl" for="qtext">Questions <span style="font-weight:400;color:var(--ink-3)">— numbered, with “Jawapan:” or “Answer:”; A)–D) lines become multiple choice</span></label>
+          <textarea class="field" id="qtext" placeholder="1. Apakah maksud kedaulatan?&#10;Jawapan: Kekuasaan tertinggi sesebuah negara…&#10;&#10;2. Negara kita merdeka pada tahun berapa?&#10;A) 1955&#10;B) 1957&#10;C) 1963&#10;D) 1969&#10;Jawapan: B"></textarea>
+        </div>
+        <div class="row">
+          <button class="btn btn-ghost" id="loadSample">Load sample (BM)</button>
+          <span class="muted" id="parseStatus">Paste questions to begin</span>
+        </div>
+      </div>
+      <aside class="card stack">
+        <div>
+          <label class="lbl">Time per question</label>
+          <div class="row" id="timerChips">
+            <button class="chip" data-t="10">10 s</button>
+            <button class="chip" data-t="20" aria-pressed="true">20 s</button>
+            <button class="chip" data-t="30">30 s</button>
+            <button class="chip" data-t="60">60 s</button>
+            <button class="chip" data-t="90">90 s</button>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">Classroom controls</label>
+          <div class="switch-row">Shuffle questions<button class="switch" id="swShuffle" role="switch" aria-pressed="false" aria-label="Shuffle questions"></button></div>
+          <div class="switch-row">Instant feedback &amp; explanations<button class="switch" id="swFeedback" role="switch" aria-pressed="true" aria-label="Instant feedback"></button></div>
+        </div>
+        <button class="btn btn-primary btn-block" id="createBtn" disabled>📡 Start session</button>
+        <p class="muted center" style="margin:0">A join code and shareable link are generated instantly</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ LOBBY ============ -->
+  <section id="ph-lobby" hidden>
+    <div class="card code-hero">
+      <span class="eyebrow">Students join with code</span>
+      <div class="live-code" id="codeBig">— — —</div>
+      <div class="muted" id="lobbyTitle"></div>
+      <div class="share-row">
+        <input class="field" readonly id="joinLink" aria-label="Join link">
+        <button class="btn btn-ghost" id="copyLink">Copy</button>
+        <a class="btn btn-primary" id="waShare" target="_blank" rel="noopener">🟢 WhatsApp</a>
+      </div>
+      <p class="muted" style="margin:10px 0 0">One tap on the link opens the quiz — students just pick a nickname.</p>
+      <div class="joiners" id="joiners"><span class="muted">Waiting for students…</span></div>
+      <div class="row" style="justify-content:center;margin-top:22px">
+        <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="startBtn" disabled>Start quiz →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RUN ============ -->
+  <section id="ph-run" hidden>
+    <div class="grid2">
+      <div class="card">
+        <div class="run-meta">
+          <span class="pill pill-accent" id="qNum">Q1</span>
+          <span id="answeredN">0 answered</span>
+          <span class="pill pill-neutral" id="accPill" hidden></span>
+          <span class="timer" id="timer">–</span>
+        </div>
+        <div class="q-text" id="qText"></div>
+        <div id="bars"></div>
+        <div id="typedWrap" hidden>
+          <div class="muted" id="typedNote">Typed answers appear when time is up.</div>
+          <div class="typed-list" id="typedList"></div>
+        </div>
+        <div class="row" style="margin-top:20px">
+          <span class="pill pill-warn" id="strugglePill" hidden></span>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost" id="endBtn">End session</button>
+          <button class="btn btn-primary" id="nextBtn">Skip timer ⏩</button>
+        </div>
+      </div>
+      <aside class="card">
+        <h3 style="font-size:15px;margin-bottom:10px">🏆 Live leaderboard</h3>
+        <div id="lead" class="muted">Scores appear after the first question.</div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ REPORT ============ -->
+  <section id="ph-report" hidden>
+    <h1 style="font-size:24px" id="repTitle"></h1>
+    <p style="color:var(--ink-2);margin:6px 0 18px" id="repSub"></p>
+    <div class="stat-grid" id="repStats"></div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="font-size:15px;margin-bottom:10px">Question-by-question</h3>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>#</th><th>Question</th><th style="width:180px">Correct</th><th>Answered</th></tr></thead><tbody id="repQ"></tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="font-size:15px;margin-bottom:10px">Students</h3>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th>#</th><th>Student</th><th>Score</th><th>Correct</th></tr></thead><tbody id="repS"></tbody></table></div>
+    </div>
+    <div class="row" style="margin-top:18px">
+      <button class="btn btn-ghost" id="csvBtn">⬇ Download CSV</button>
+      <button class="btn btn-primary" id="againBtn">Host another session</button>
+    </div>
+  </section>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/parse.js"></script>
+<script src="/teacher.js"></script>
+</body>
+</html>
