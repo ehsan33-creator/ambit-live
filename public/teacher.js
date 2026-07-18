@@ -182,3 +182,34 @@ socket.io.on("reconnect", () => { if (session) toast("Reconnected — note: an i
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 reparse();
+
+/* ---------- one-click import from the Ambit studio app (#q= payload) ---------- */
+function questionsToText(qs) {
+  return qs.map((q, i) => {
+    let block = `${i + 1}. ${q.text}`;
+    if (q.opts && q.opts.length >= 2) {
+      block += "\n" + q.opts.map((o, j) => `${"ABCDEF"[j]}) ${o}`).join("\n");
+      block += `\nJawapan: ${"ABCDEF"[q.correct || 0]}${q.expl ? ` ${q.expl}` : ""}`;
+    } else {
+      block += `\nJawapan: ${q.answer || ""}`;
+    }
+    return block;
+  }).join("\n\n");
+}
+(function importFromHash() {
+  const m = location.hash.match(/^#q=(.+)$/);
+  if (!m) return;
+  try {
+    const json = decodeURIComponent(escape(atob(decodeURIComponent(m[1]))));
+    const data = JSON.parse(json);
+    if (Array.isArray(data.questions) && data.questions.length) {
+      if (data.title) $("#title").value = String(data.title).slice(0, 120);
+      $("#qtext").value = questionsToText(data.questions.slice(0, 100));
+      reparse();
+      toast(`Imported ${questions.length} questions from Ambit — review and press Start session`);
+    }
+    history.replaceState(null, "", location.pathname);
+  } catch (e) {
+    toast("Couldn't read the imported questions — paste them manually instead");
+  }
+})();
