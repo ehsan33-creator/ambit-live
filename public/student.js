@@ -43,6 +43,7 @@ $("#nick").addEventListener("keydown", e => { if (e.key === "Enter") join(); });
 socket.on("question", q => renderQuestion(q, false));
 function renderQuestion(q, alreadyAnswered) {
   cur = q;
+  answeredThisQ = !!alreadyAnswered;
   show("sp-q");
   $("#sqNum").textContent = `Q${q.i + 1} / ${q.total}`;
   $("#sScore").textContent = `${score} pts`;
@@ -52,6 +53,7 @@ function renderQuestion(q, alreadyAnswered) {
     $("#sTypedWrap").hidden = true;
     $("#sOpts").innerHTML = q.opts.map((o, i) => `<button class="opt-btn" data-oi="${i}">${esc(o)}</button>`).join("");
     $$(".opt-btn").forEach(b => b.addEventListener("click", () => {
+      answeredThisQ = true;
       $$(".opt-btn").forEach(x => x.disabled = true);
       b.classList.add("sel");
       socket.emit("player:answer", { oi: +b.dataset.oi }, () => { $("#sFeed").textContent = "Answer locked in ✓"; });
@@ -65,6 +67,7 @@ function renderQuestion(q, alreadyAnswered) {
     const submit = () => {
       const text = $("#sTyped").value.trim();
       if (!text) return;
+      answeredThisQ = true;
       socket.emit("player:answer", { text }, res => {
         if (res && res.locked) {
           $("#sTyped").disabled = true; $("#sSubmit").disabled = true;
@@ -78,13 +81,23 @@ function renderQuestion(q, alreadyAnswered) {
   }
   startTick(q.endsAt);
 }
+let answeredThisQ = false;
 function startTick(endsAt) {
   clearInterval(tickIv);
   const step = () => {
     const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
     $("#sTimer").textContent = left;
     $("#sTimer").classList.toggle("low", left <= 5);
-    if (left <= 0) clearInterval(tickIv);
+    if (left <= 0) {
+      clearInterval(tickIv);
+      // paced mode has no server timer — report the timeout ourselves
+      if (cur && cur.paced && !answeredThisQ) {
+        answeredThisQ = true;
+        $$(".opt-btn").forEach(x => x.disabled = true);
+        $("#sTyped") && ($("#sTyped").disabled = true);
+        socket.emit("player:answer", { timedOut: true });
+      }
+    }
   };
   step();
   tickIv = setInterval(step, 250);
@@ -111,7 +124,18 @@ socket.on("reveal", r => {
       : `<span style="color:var(--crit)">Not quite</span>`;
   if (!r.right) html += `<div class="expl"><b>Answer:</b> ${esc(r.answerText)}${r.expl ? `<br>${esc(r.expl)}` : ""}</div>`;
   else if (r.expl) html += `<div class="expl">${esc(r.expl)}</div>`;
+  if (r.paced) html += `<button class="btn btn-primary btn-block" id="sNext" style="margin-top:14px">${r.last ? "Finish 🏁" : "Next question →"}</button>`;
   $("#sFeed").innerHTML = html;
+  const nextBtn = $("#sNext");
+  if (nextBtn) nextBtn.addEventListener("click", () => { nextBtn.disabled = true; socket.emit("player:next"); });
+});
+
+socket.on("pacedFinished", d => {
+  clearInterval(tickIv);
+  show("sp-end");
+  $("#endScore").textContent = d.score;
+  $("#endRank").textContent = `${d.correct}/${d.total} correct — waiting for your teacher to close the session for final ranks…`;
+  $("#endReview").innerHTML = "";
 });
 
 socket.on("ended", rep => {

@@ -112,9 +112,72 @@ function reveal(s) {
   });
 }
 
+/* ---- participant-paced mode: every student advances independently ---- */
+function pacedQuestionPayload(s, p) {
+  const q = s.questions[p.qi];
+  return { i: p.qi, total: s.questions.length, type: q.type, text: q.text, opts: q.opts || null,
+           timer: s.settings.timer, endsAt: Date.now() + s.settings.timer * 1000, paced: true };
+}
+function sendPacedQ(s, sid, p) {
+  p.qT0 = Date.now();
+  const sock = io.sockets.sockets.get(sid);
+  if (sock) sock.emit("question", pacedQuestionPayload(s, p));
+}
+function pacedSummary(s) {
+  return [...s.players.values()].map(p => ({
+    nick: p.nick, connected: p.connected, done: !!p.done,
+    answered: p.answers.filter(a => a !== undefined).length,
+    correct: p.correct, score: p.score,
+  }));
+}
+function startPaced(s) {
+  s.phase = "paced";
+  s.pacedStats = s.questions.map(() => ({ answered: 0, right: 0 }));
+  io.to(hostRoom(s)).emit("pacedStart", { total: s.questions.length, players: pacedSummary(s) });
+  for (const [sid, p] of s.players) { p.qi = 0; p.done = false; sendPacedQ(s, sid, p); }
+}
+function pacedAnswer(s, socket, p, data, cb) {
+  if (p.done || p.qi == null || p.qi >= s.questions.length) return;
+  if (p.answers[p.qi] !== undefined) { if (cb) cb({ locked: true }); return; }
+  const q = s.questions[p.qi];
+  const ms = Date.now() - (p.qT0 || Date.now());
+  let right = false, given = null, answered = false;
+  if (!(data && data.timedOut)) {
+    if (q.opts) {
+      const oi = (data || {}).oi | 0;
+      if (oi < 0 || oi >= q.opts.length) return;
+      given = q.opts[oi]; right = oi === q.correct; answered = true;
+    } else {
+      const text = clean((data || {}).text, 300);
+      if (!text) { if (cb) cb({ error: "Type an answer first." }); return; }
+      given = text; right = fuzzyCorrect(text, q.answer); answered = true;
+    }
+  }
+  p.answers[p.qi] = { given, right };
+  if (right) {
+    p.correct++;
+    const speed = Math.max(0, s.settings.timer * 1000 - ms) / (s.settings.timer * 1000);
+    p.score += 100 + Math.round(speed * 100);
+  }
+  const st = s.pacedStats[p.qi];
+  if (answered) { st.answered++; if (right) st.right++; }
+  if (cb) cb({ locked: true });
+  socket.emit("reveal", {
+    answered, right,
+    correct: q.opts ? q.correct : null,
+    answerText: q.opts ? q.opts[q.correct] : q.answer,
+    expl: s.settings.feedback ? (q.expl || "") : "",
+    score: p.score, paced: true, last: p.qi + 1 >= s.questions.length,
+  });
+  io.to(hostRoom(s)).emit("pacedProgress", { players: pacedSummary(s) });
+}
+
 function endSession(s) {
   clearTimeout(s.cur && s.cur.timeout);
   if (s.phase === "ended") return;
+  if (s.pacedStats) s.pacedStats.forEach((st, i) => {
+    s.qstats[i] = { text: s.questions[i].text, acc: st.answered ? Math.round(st.right / st.answered * 100) : 0, answered: st.answered };
+  });
   s.phase = "ended";
   const stats = s.qstats.filter(Boolean);
   const players = [...s.players.values()].sort((a, b) => b.score - a.score);
@@ -160,6 +223,7 @@ io.on("connection", socket => {
         timer: [10, 20, 30, 45, 60, 90, 120].includes(+(data.settings || {}).timer) ? +data.settings.timer : 20,
         feedback: (data.settings || {}).feedback !== false,
         shuffle: !!(data.settings || {}).shuffle,
+        mode: (data.settings || {}).mode === "paced" ? "paced" : "instructor",
       };
       if (settings.shuffle) questions.sort(() => Math.random() - 0.5);
       const code = makeCode();
@@ -176,7 +240,8 @@ io.on("connection", socket => {
 
   socket.on("host:start", () => {
     const s = sessions.get((socket.data || {}).code);
-    if (s && s.hostId === socket.id && s.phase === "lobby" && s.players.size > 0) startQuestion(s, 0);
+    if (!(s && s.hostId === socket.id && s.phase === "lobby" && s.players.size > 0)) return;
+    if (s.settings.mode === "paced") startPaced(s); else startQuestion(s, 0);
   });
   socket.on("host:next", () => {
     const s = sessions.get((socket.data || {}).code);
@@ -224,14 +289,20 @@ io.on("connection", socket => {
     socket.data = { role: "player", code };
     socket.join(code);
     io.to(hostRoom(s)).emit("lobby", hostLobby(s));
+    if (s.phase === "paced" && player.qi == null) { player.qi = 0; player.done = false; player.qT0 = Date.now(); }
+    if (s.phase === "paced") io.to(hostRoom(s)).emit("pacedProgress", { players: pacedSummary(s) });
     cb({ ok: true, nick: player.nick, title: s.title, phase: s.phase,
-         question: s.phase === "question" ? publicQuestion(s) : null,
-         alreadyAnswered: s.phase === "question" && s.cur.answers.has(socket.id) });
+         question: s.phase === "question" ? publicQuestion(s)
+                 : (s.phase === "paced" && !player.done && player.qi < s.questions.length ? pacedQuestionPayload(s, player) : null),
+         alreadyAnswered: s.phase === "question" ? s.cur.answers.has(socket.id)
+                        : (s.phase === "paced" ? player.answers[player.qi] !== undefined : false) });
   });
 
   socket.on("player:answer", (data, cb) => {
     const s = sessions.get((socket.data || {}).code);
-    if (!s || s.phase !== "question" || !s.players.has(socket.id)) { if (cb) cb({ error: "Not accepting answers right now." }); return; }
+    if (!s || !s.players.has(socket.id)) { if (cb) cb({ error: "Not accepting answers right now." }); return; }
+    if (s.phase === "paced") return pacedAnswer(s, socket, s.players.get(socket.id), data, cb);
+    if (s.phase !== "question") { if (cb) cb({ error: "Not accepting answers right now." }); return; }
     if (s.cur.answers.has(socket.id)) { if (cb) cb({ locked: true }); return; }
     const q = s.questions[s.qi];
     const ms = Date.now() - s.cur.t0;
@@ -247,6 +318,23 @@ io.on("connection", socket => {
     if (cb) cb({ locked: true });
     io.to(hostRoom(s)).emit("progress", { answered: s.cur.answers.size, of: connectedCount(s), counts: answerCounts(s) });
     if (s.cur.answers.size >= connectedCount(s)) reveal(s);
+  });
+
+  socket.on("player:next", () => {
+    const s = sessions.get((socket.data || {}).code);
+    if (!s || s.phase !== "paced" || !s.players.has(socket.id)) return;
+    const p = s.players.get(socket.id);
+    if (p.done || p.answers[p.qi] === undefined) return; // must answer (or time out) first
+    p.qi++;
+    if (p.qi >= s.questions.length) {
+      p.done = true;
+      socket.emit("pacedFinished", { score: p.score, correct: p.correct, total: s.questions.length });
+      io.to(hostRoom(s)).emit("pacedProgress", { players: pacedSummary(s) });
+      if ([...s.players.values()].every(x => x.done || !x.connected)) endSession(s);
+    } else {
+      sendPacedQ(s, socket.id, p);
+      io.to(hostRoom(s)).emit("pacedProgress", { players: pacedSummary(s) });
+    }
   });
 
   socket.on("disconnect", () => {

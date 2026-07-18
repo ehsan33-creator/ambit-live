@@ -16,7 +16,7 @@ function toast(msg) {
   setTimeout(() => el.remove(), 2600);
 }
 function phase(p) {
-  ["setup", "lobby", "run", "report"].forEach(x => $("#ph-" + x).hidden = x !== p);
+  ["setup", "lobby", "run", "paced", "report"].forEach(x => $("#ph-" + x).hidden = x !== p);
   window.scrollTo(0, 0);
 }
 
@@ -25,6 +25,17 @@ $$("#timerChips .chip").forEach(c => c.addEventListener("click", () => {
   $$("#timerChips .chip").forEach(x => x.removeAttribute("aria-pressed"));
   c.setAttribute("aria-pressed", "true");
 }));
+$$("#modeChips .chip").forEach(c => c.addEventListener("click", () => {
+  $$("#modeChips .chip").forEach(x => x.removeAttribute("aria-pressed"));
+  c.setAttribute("aria-pressed", "true");
+  $("#modeNote").textContent = c.dataset.m === "paced"
+    ? "Students move to the next question on their own as soon as they answer."
+    : "You control the pace — everyone answers each question together.";
+}));
+function setChip(groupId, attr, value) {
+  const target = $$("#" + groupId + " .chip").find(c => c.dataset[attr] == value);
+  if (target) target.click();
+}
 $$(".switch").forEach(s => s.addEventListener("click", () =>
   s.setAttribute("aria-pressed", s.getAttribute("aria-pressed") !== "true")));
 
@@ -49,10 +60,12 @@ $("#createBtn").addEventListener("click", () => {
     timer: +($("#timerChips .chip[aria-pressed='true']")?.dataset.t || 20),
     shuffle: $("#swShuffle").getAttribute("aria-pressed") === "true",
     feedback: $("#swFeedback").getAttribute("aria-pressed") === "true",
+    mode: $("#modeChips .chip[aria-pressed='true']")?.dataset.m || "instructor",
   };
   socket.emit("host:create", { title: $("#title").value.trim(), questions, settings }, res => {
     if (res.error) return toast(res.error);
     session = res;
+    saveCurrentToLib(true); // anything you host is kept in your library
     const link = location.origin + "/join/" + res.code;
     $("#codeBig").textContent = res.code.slice(0, 3) + " " + res.code.slice(3);
     $("#lobbyTitle").textContent = `${res.title} · ${res.count} questions`;
@@ -140,6 +153,56 @@ socket.on("revealHost", r => {
 $("#nextBtn").addEventListener("click", () => socket.emit("host:next"));
 $("#endBtn").addEventListener("click", () => { if (confirm("End the session for everyone?")) socket.emit("host:end"); });
 
+/* ---------- participant-paced dashboard ---------- */
+let pacedTotal = 0;
+function renderPaced(players) {
+  $("#pacedRows").innerHTML = players.map(p => {
+    const prog = p.done ? pacedTotal : p.answered;
+    const pct = pacedTotal ? Math.round(prog / pacedTotal * 100) : 0;
+    return `<tr>
+      <td style="font-weight:600">${esc(p.nick)}${p.connected ? "" : " <span class='muted'>(offline)</span>"}${p.done ? " ✅" : ""}</td>
+      <td><div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div><b style="font-size:12px">${prog}/${pacedTotal}</b></div></td>
+      <td>${p.correct}</td><td>${p.score}</td></tr>`;
+  }).join("");
+  const top = [...players].sort((a, b) => b.score - a.score).slice(0, 8);
+  $("#pacedLead").innerHTML = top.map((p, i) =>
+    `<div class="lead-row"><span class="rank">${i + 1}</span><b>${esc(p.nick)}</b><span class="sc">${p.score}</span></div>`).join("");
+}
+socket.on("pacedStart", d => { pacedTotal = d.total; phase("paced"); renderPaced(d.players); });
+socket.on("pacedProgress", d => renderPaced(d.players));
+$("#pacedEnd").addEventListener("click", () => { if (confirm("End the session and generate the report?")) socket.emit("host:end"); });
+
+/* ---------- device library (localStorage) ---------- */
+const LIB_KEY = "ambitLiveLibrary";
+const loadLibrary = () => { try { return JSON.parse(localStorage.getItem(LIB_KEY) || "[]"); } catch (e) { return []; } };
+const storeLibrary = l => { try { localStorage.setItem(LIB_KEY, JSON.stringify(l.slice(0, 30))); } catch (e) {} };
+function renderLib() {
+  const lib = loadLibrary();
+  $("#libBox").hidden = !lib.length;
+  $("#libList").innerHTML = lib.map((s, i) => `<div class="row" style="border:1px solid var(--line-soft);border-radius:12px;padding:9px 12px;justify-content:space-between">
+    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis"><b>${esc(s.title)}</b><span class="muted"> · ${s.questions.length} questions · ${new Date(s.ts).toLocaleDateString()}</span></span>
+    <span class="row" style="flex-wrap:nowrap"><button class="chip" data-libload="${i}">Load</button><button class="chip" data-libdel="${i}" aria-label="Delete ${esc(s.title)}">🗑</button></span></div>`).join("");
+  $$("[data-libload]").forEach(b => b.onclick = () => {
+    const s = loadLibrary()[+b.dataset.libload]; if (!s) return;
+    $("#title").value = s.title;
+    $("#qtext").value = questionsToText(s.questions);
+    reparse(); window.scrollTo(0, 0);
+    toast("Loaded from library — press Start session to host it");
+  });
+  $$("[data-libdel]").forEach(b => b.onclick = () => {
+    const l = loadLibrary(); l.splice(+b.dataset.libdel, 1); storeLibrary(l); renderLib();
+  });
+}
+function saveCurrentToLib(silent) {
+  if (!questions.length) { if (!silent) toast("No questions detected yet — nothing to save"); return; }
+  const title = $("#title").value.trim() || "Untitled set";
+  const lib = loadLibrary().filter(x => x.title !== title);
+  lib.unshift({ title, ts: Date.now(), questions });
+  storeLibrary(lib); renderLib();
+  if (!silent) toast("Saved — find it under My library whenever you come back");
+}
+$("#saveLibBtn").addEventListener("click", () => saveCurrentToLib(false));
+
 /* ---------- report ---------- */
 let lastReport = null;
 socket.on("ended", rep => {
@@ -182,6 +245,7 @@ socket.io.on("reconnect", () => { if (session) toast("Reconnected — note: an i
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 reparse();
+renderLib();
 
 /* ---------- one-click import from the Ambit studio app (#q= payload) ---------- */
 function questionsToText(qs) {
@@ -206,7 +270,12 @@ function questionsToText(qs) {
       if (data.title) $("#title").value = String(data.title).slice(0, 120);
       $("#qtext").value = questionsToText(data.questions.slice(0, 100));
       reparse();
-      toast(`Imported ${questions.length} questions from Ambit — review and press Start session`);
+      if (data.settings) {
+        if (data.settings.mode) setChip("modeChips", "m", data.settings.mode === "paced" ? "paced" : "instructor");
+        if (data.settings.timer) setChip("timerChips", "t", data.settings.timer);
+      }
+      saveCurrentToLib(true); // imported sets land in the library automatically
+      toast(`Imported ${questions.length} questions from Ambit — saved to My library`);
     }
     history.replaceState(null, "", location.pathname);
   } catch (e) {

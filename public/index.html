@@ -27,10 +27,23 @@
         </div>
         <div class="row">
           <button class="btn btn-ghost" id="loadSample">Load sample (BM)</button>
+          <button class="btn btn-ghost" id="saveLibBtn">💾 Save to library</button>
           <span class="muted" id="parseStatus">Paste questions to begin</span>
+        </div>
+        <div id="libBox" hidden>
+          <label class="lbl" style="margin-top:10px">📚 My library <span style="font-weight:400;color:var(--ink-3)">— saved on this device, reuse anytime</span></label>
+          <div id="libList" class="stack" style="gap:8px"></div>
         </div>
       </div>
       <aside class="card stack">
+        <div>
+          <label class="lbl">Mode</label>
+          <div class="row" id="modeChips">
+            <button class="chip" data-m="instructor" aria-pressed="true">Instructor-led</button>
+            <button class="chip" data-m="paced">Participant-paced</button>
+          </div>
+          <p class="muted" id="modeNote" style="margin:7px 0 0">You control the pace — everyone answers each question together.</p>
+        </div>
         <div>
           <label class="lbl">Time per question</label>
           <div class="row" id="timerChips">
@@ -98,6 +111,27 @@
       <aside class="card">
         <h3 style="font-size:15px;margin-bottom:10px">🏆 Live leaderboard</h3>
         <div id="lead" class="muted">Scores appear after the first question.</div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ PACED RUN ============ -->
+  <section id="ph-paced" hidden>
+    <div class="grid2">
+      <div class="card">
+        <h3 style="font-size:15px;margin-bottom:4px">Student progress</h3>
+        <p class="muted" style="margin:0 0 10px" id="pacedNote">Students answer at their own pace — the session ends automatically when everyone finishes, or end it yourself.</p>
+        <div class="scroll-x"><table class="tbl">
+          <thead><tr><th>Student</th><th style="width:200px">Progress</th><th>Correct</th><th>Score</th></tr></thead>
+          <tbody id="pacedRows"></tbody>
+        </table></div>
+        <div class="row" style="margin-top:16px;justify-content:flex-end">
+          <button class="btn btn-ghost" id="pacedEnd">End session → report</button>
+        </div>
+      </div>
+      <aside class="card">
+        <h3 style="font-size:15px;margin-bottom:10px">🏆 Live leaderboard</h3>
+        <div id="pacedLead" class="muted">Scores appear as students answer.</div>
       </aside>
     </div>
   </section>
