@@ -13,6 +13,7 @@ const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e6 })
 
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/join/:code?", (_req, res) => res.sendFile(path.join(__dirname, "public", "join.html")));
+app.get("/studio", (_req, res) => res.sendFile(path.join(__dirname, "public", "studio.html")));
 app.get("/healthz", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
 
 const PORT = process.env.PORT || 3000;
