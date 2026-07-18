@@ -228,15 +228,44 @@ io.on("connection", socket => {
       };
       if (settings.shuffle) questions.sort(() => Math.random() - 0.5);
       const code = makeCode();
-      const s = { code, hostId: socket.id, title: clean(data.title, 120) || "Live quiz",
+      const hostKey = require("crypto").randomBytes(12).toString("hex");
+      const s = { code, hostId: socket.id, hostKey, title: clean(data.title, 120) || "Live quiz",
                   settings, questions, players: new Map(), qi: -1, phase: "lobby", qstats: [], cur: {} };
       sessions.set(code, s);
       socket.data = { role: "host", code };
       socket.join(hostRoom(s));
-      cb({ code, title: s.title, count: questions.length });
+      cb({ code, title: s.title, count: questions.length, hostKey });
     } catch (e) {
       cb({ error: "Could not create the session — check the question format." });
     }
+  });
+
+  /* teacher refreshed or changed device: reclaim the session with the host key */
+  socket.on("host:resume", (data, cb) => {
+    if (typeof cb !== "function") return;
+    const code = String((data || {}).code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const s = sessions.get(code);
+    if (!s || !s.hostKey || s.hostKey !== (data || {}).hostKey) return cb({ error: "Session not found." });
+    if (s.phase === "ended") return cb({ error: "Session already ended." });
+    s.hostId = socket.id;
+    socket.data = { role: "host", code };
+    socket.join(hostRoom(s));
+    const snap = { code, title: s.title, count: s.questions.length, phase: s.phase,
+                   settings: s.settings, lobby: hostLobby(s) };
+    if (s.phase === "question" || s.phase === "reveal") {
+      const q = s.questions[s.qi];
+      snap.question = { ...publicQuestion(s), correct: q.correct, answer: q.answer, expl: q.expl };
+      if (s.phase === "question") {
+        snap.progress = { answered: s.cur.answers.size, of: connectedCount(s), counts: answerCounts(s) };
+      } else {
+        snap.reveal = { counts: answerCounts(s), acc: (s.qstats[s.qi] || {}).acc || 0,
+                        answered: (s.qstats[s.qi] || {}).answered || 0,
+                        correct: q.correct, answerText: q.opts ? q.opts[q.correct] : q.answer,
+                        leaderboard: leaderboard(s), last: s.qi + 1 >= s.questions.length, typed: null };
+      }
+    }
+    if (s.phase === "paced") snap.paced = { total: s.questions.length, players: pacedSummary(s) };
+    cb(snap);
   });
 
   socket.on("host:start", () => {

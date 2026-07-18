@@ -66,34 +66,40 @@ $("#createBtn").addEventListener("click", () => {
     if (res.error) return toast(res.error);
     session = res;
     saveCurrentToLib(true); // anything you host is kept in your library
-    const link = location.origin + "/join/" + res.code;
-    $("#codeBig").textContent = res.code.slice(0, 3) + " " + res.code.slice(3);
-    $("#lobbyTitle").textContent = `${res.title} · ${res.count} questions`;
-    $("#joinLink").value = link;
-    const msg = `📚 ${res.title}\nJoin our live quiz now — no sign-up needed!\nTap: ${link}\nor enter code ${res.code} at ${location.origin}/join`;
-    $("#waShare").href = "https://wa.me/?text=" + encodeURIComponent(msg);
+    try { localStorage.setItem("ambitLiveHost", JSON.stringify({ code: res.code, hostKey: res.hostKey })); } catch (e) {}
+    setLobbyHeader(res.code, res.title, res.count);
     phase("lobby");
   });
 });
+function setLobbyHeader(code, title, count) {
+  const link = location.origin + "/join/" + code;
+  $("#codeBig").textContent = code.slice(0, 3) + " " + code.slice(3);
+  $("#lobbyTitle").textContent = `${title} · ${count} questions`;
+  $("#joinLink").value = link;
+  const msg = `📚 ${title}\nJoin our live quiz now — no sign-up needed!\nTap: ${link}\nor enter code ${code} at ${location.origin}/join`;
+  $("#waShare").href = "https://wa.me/?text=" + encodeURIComponent(msg);
+}
+function clearHostSession() { try { localStorage.removeItem("ambitLiveHost"); } catch (e) {} }
 $("#copyLink").addEventListener("click", () => {
   navigator.clipboard?.writeText($("#joinLink").value);
   toast("Join link copied — paste it in your class group");
 });
-$("#cancelBtn").addEventListener("click", () => location.reload());
+$("#cancelBtn").addEventListener("click", () => { clearHostSession(); location.reload(); });
 
 /* ---------- lobby ---------- */
-socket.on("lobby", ({ players }) => {
+function onLobby({ players }) {
   $("#joiners").innerHTML = players.length
     ? players.map(p => `<span class="joiner ${p.connected ? "" : "off"}"><span class="dot"></span>${esc(p.nick)}</span>`).join("")
     : `<span class="muted">Waiting for students…</span>`;
   const on = players.filter(p => p.connected).length;
   $("#startBtn").disabled = on < 1;
   $("#startBtn").textContent = on < 1 ? "Start quiz →" : `Start quiz with ${on} student${on === 1 ? "" : "s"} →`;
-});
+}
+socket.on("lobby", onLobby);
 $("#startBtn").addEventListener("click", () => socket.emit("host:start"));
 
 /* ---------- run ---------- */
-socket.on("question", q => {
+function onQuestion(q) {
   curQ = q;
   phase("run");
   $("#qNum").textContent = `Q${q.i + 1} / ${q.total}`;
@@ -110,7 +116,8 @@ socket.on("question", q => {
     $("#typedNote").textContent = `Typed answer — model: “${q.answer}”. Answers are auto-marked by keyword match.`;
   }
   startTick(q.endsAt);
-});
+}
+socket.on("question", onQuestion);
 function startTick(endsAt) {
   clearInterval(tickIv);
   const step = () => {
@@ -131,11 +138,12 @@ function drawBars(counts, correct) {
       <span class="n">${counts[i]}</span>
     </div>`).join("");
 }
-socket.on("progress", ({ answered, of, counts }) => {
+function onProgress({ answered, of, counts }) {
   $("#answeredN").textContent = `${answered} of ${of} answered`;
   if (counts && curQ && curQ.opts) drawBars(counts, null);
-});
-socket.on("revealHost", r => {
+}
+socket.on("progress", onProgress);
+function onRevealHost(r) {
   clearInterval(tickIv);
   $("#timer").textContent = "0";
   if (curQ.opts && r.counts) drawBars(r.counts, r.correct);
@@ -149,7 +157,8 @@ socket.on("revealHost", r => {
   $("#lead").innerHTML = r.leaderboard.map((p, i) =>
     `<div class="lead-row"><span class="rank">${i + 1}</span><b>${esc(p.nick)}</b><span class="sc">${p.score}</span></div>`).join("");
   $("#nextBtn").textContent = r.last ? "Finish → report" : "Next question →";
-});
+}
+socket.on("revealHost", onRevealHost);
 $("#nextBtn").addEventListener("click", () => socket.emit("host:next"));
 $("#endBtn").addEventListener("click", () => { if (confirm("End the session for everyone?")) socket.emit("host:end"); });
 
@@ -209,6 +218,7 @@ socket.on("ended", rep => {
   if (!rep.players) return; // student-shaped payload safety
   lastReport = rep;
   clearInterval(tickIv);
+  clearHostSession();
   phase("report");
   $("#repTitle").textContent = rep.title;
   $("#repSub").textContent = `${rep.players.length} students · ${rep.questions.length} questions · code ${rep.code}`;
@@ -241,11 +251,36 @@ $("#csvBtn").addEventListener("click", () => {
 $("#againBtn").addEventListener("click", () => location.reload());
 
 socket.on("disconnect", () => toast("Connection lost — reconnecting…"));
-socket.io.on("reconnect", () => { if (session) toast("Reconnected — note: an interrupted session may need a restart"); });
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 reparse();
 renderLib();
+
+/* ---------- resume a running session after refresh/reconnect ---------- */
+function tryResume() {
+  let saved; try { saved = JSON.parse(localStorage.getItem("ambitLiveHost") || "null"); } catch (e) {}
+  if (!saved || !saved.code) return;
+  socket.emit("host:resume", saved, snap => {
+    if (snap.error) { clearHostSession(); return; }
+    session = { code: snap.code, title: snap.title, count: snap.count };
+    setLobbyHeader(snap.code, snap.title, snap.count);
+    if (snap.phase === "lobby") {
+      phase("lobby");
+      if (snap.lobby) onLobby(snap.lobby);
+    } else if (snap.paced) {
+      pacedTotal = snap.paced.total;
+      phase("paced");
+      renderPaced(snap.paced.players);
+    } else if (snap.question) {
+      onQuestion(snap.question);
+      if (snap.progress) onProgress(snap.progress);
+      if (snap.reveal) onRevealHost(snap.reveal);
+    }
+    toast(`Session ${snap.code} restored — carry on`);
+  });
+}
+if (socket.connected) tryResume();
+socket.on("connect", tryResume);
 
 /* ---------- one-click import from the Ambit studio app (#q= payload) ---------- */
 function questionsToText(qs) {

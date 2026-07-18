@@ -1491,11 +1491,12 @@ function wireSrcPanel() {
   }
   const dz = $("#dropzone");
   if (dz) {
-    const fake = {
-      document:["Digestive-System-Notes.pdf","3.2 MB","📄"], image:["cell-diagram.png","840 KB","🖼️"],
-      media:["Lecture-07-Recording.mp4","112 MB","🎥"], slides:["Chapter-4-Slides.pptx","6.1 MB","📊"],
-      multi:["Unit-3-materials (4 files)","18.6 MB","🗂️"]
-    }[currentSrc] || ["upload.pdf","1 MB","📄"];
+    const iconFor = f => f.type.startsWith("image") ? "🖼️" : f.type.startsWith("video") ? "🎥" : f.type.startsWith("audio") ? "🎙️" : /\.(pptx?|key)$/i.test(f.name) ? "📊" : "📄";
+    const accept = {document:".pdf,.doc,.docx,.pptx,.txt,.md", image:"image/*", media:"audio/*,video/*", slides:".ppt,.pptx,.key"}[currentSrc] || "";
+    const picker = document.createElement("input");
+    picker.type = "file"; picker.hidden = true; picker.multiple = true;
+    if (accept) picker.accept = accept;
+    dz.appendChild(picker);
     const addFile = (name, size, icon) => {
       const f = {name, size, icon, progress:0};
       attachedFiles.push(f); renderFiles();
@@ -1505,14 +1506,14 @@ function wireSrcPanel() {
         if (f.progress >= 100) { clearInterval(iv); validateCreate(); toast("Upload complete — content type detected"); }
       }, 160);
     };
-    dz.addEventListener("click", () => addFile(...fake));
-    dz.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); addFile(...fake); }});
+    const addReal = files => [...files].forEach(f => addFile(f.name, (f.size/1048576).toFixed(1) + " MB", iconFor(f)));
+    picker.addEventListener("click", e => e.stopPropagation());
+    picker.addEventListener("change", () => { addReal(picker.files); picker.value = ""; });
+    dz.addEventListener("click", () => picker.click());
+    dz.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); picker.click(); }});
     ["dragover","dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("over"); }));
     ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("over"); }));
-    dz.addEventListener("drop", e => {
-      const f = e.dataTransfer.files[0];
-      addFile(f ? f.name : fake[0], f ? (f.size/1048576).toFixed(1) + " MB" : fake[1], fake[2]);
-    });
+    dz.addEventListener("drop", e => addReal(e.dataTransfer.files));
   }
 }
 function renderFiles() {
