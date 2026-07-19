@@ -737,10 +737,10 @@ a.btn{text-decoration:none}
       <div class="pop-wrap">
         <button class="avatar" id="profileBtn" aria-label="Profile menu">E</button>
         <div class="pop" id="profilePop" hidden>
-          <h4>e.ehsanzubaidi@gmail.com</h4>
+          <h4 id="accountEmail">Not signed in</h4>
           <button class="pop-item" data-nav-link="settings"><span class="em">⚙️</span><span>Settings &amp; API keys</span></button>
           <button class="pop-item" data-nav-link="settings"><span class="em">💳</span><span>Usage &amp; billing</span></button>
-          <button class="pop-item" id="backToLanding"><span class="em">👋</span><span>Sign out</span></button>
+          <button class="pop-item" id="authAction"><span class="em">👤</span><span id="authActionLabel">Sign in / Create account</span></button>
         </div>
       </div>
     </header>
@@ -1265,10 +1265,7 @@ function enterApp(view) {
   go(view || "dashboard");
 }
 $$("[data-enter]").forEach(b => b.addEventListener("click", () => enterApp(b.dataset.enter)));
-$("#backToLanding").addEventListener("click", () => {
-  $("#appShell").hidden = true; $("#landing").hidden = false;
-  document.body.classList.add("on-landing"); window.scrollTo(0,0);
-});
+
 $("#brandHome").addEventListener("click", () => go("dashboard"));
 
 /* ---------- theme ---------- */
@@ -1463,7 +1460,7 @@ $("#globalSearch").addEventListener("input", () => {
 });
 document.addEventListener("click", e => {
   const open = e.target.closest("[data-open]");
-  if (open) openAssessment(+open.dataset.open);
+  if (open) openAssessment(open.dataset.open);
 });
 
 /* =================================================================
@@ -1510,16 +1507,21 @@ function wireSrcPanel() {
     picker.type = "file"; picker.hidden = true; picker.multiple = true;
     if (accept) picker.accept = accept;
     dz.appendChild(picker);
-    const addFile = (name, size, icon) => {
-      const f = {name, size, icon, progress:0};
+    const addReal = files => [...files].forEach(file => {
+      const f = { name: file.name, size: (file.size/1048576).toFixed(1) + " MB", icon: iconFor(file), progress: 8 };
       attachedFiles.push(f); renderFiles();
-      const iv = setInterval(() => {
-        f.progress = Math.min(100, f.progress + 8 + Math.random()*14);
-        renderFiles();
-        if (f.progress >= 100) { clearInterval(iv); validateCreate(); toast("Upload complete — content type detected"); }
-      }, 160);
-    };
-    const addReal = files => [...files].forEach(f => addFile(f.name, (f.size/1048576).toFixed(1) + " MB", iconFor(f)));
+      const iv = setInterval(() => { if (f.progress < 88) { f.progress += 6; renderFiles(); } }, 220);
+      const fd = new FormData(); fd.append("file", file);
+      fetch(LIVE_URL + "/api/extract", { method: "POST", body: fd })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          clearInterval(iv); f.progress = 100;
+          if (ok && d.text) { f.text = d.text; f.chars = d.chars; toast(`Read ${d.chars.toLocaleString()} characters from ${f.name}`); }
+          else { f.note = (d && d.error) || "No text extracted"; toast(f.note); }
+          renderFiles(); validateCreate();
+        })
+        .catch(() => { clearInterval(iv); f.progress = 100; f.note = "Extraction failed"; renderFiles(); validateCreate(); toast("Extraction failed — generation will use the topic instead"); });
+    });
     picker.addEventListener("click", e => e.stopPropagation());
     picker.addEventListener("change", () => { addReal(picker.files); picker.value = ""; });
     dz.addEventListener("click", () => picker.click());
@@ -1536,7 +1538,7 @@ function renderFiles() {
     <span class="grow">${f.name}</span><small>${f.size}</small>
     ${f.progress < 100
       ? `<div class="up-track" style="flex-basis:100%"><div class="up-fill" style="width:${f.progress}%"></div></div>`
-      : `<span class="pill pill-good">Ready</span>`}
+      : `<span class="pill ${f.text ? "pill-good" : "pill-neutral"}">${f.text ? "✓ " + (f.chars || 0).toLocaleString() + " chars" : (f.note || "Ready")}</span>`}
     <button class="file-x" data-rmfile="${i}" aria-label="Remove ${f.name}">✕</button></div>`).join("");
   $$("[data-rmfile]", fl).forEach(b => b.addEventListener("click", () => {
     attachedFiles.splice(+b.dataset.rmfile,1); renderFiles(); validateCreate();
@@ -1636,6 +1638,8 @@ async function aiGenerate(promptText){
     topic: (promptText || "").split("\n")[0].slice(0, 300),
     prompt: (promptText || "").slice(0, 4000),
     url: currentSrc === "website" ? (($("#srcUrl") || {}).value || "").trim() : undefined,
+    source: ["document","multi","slides","image","media"].includes(currentSrc)
+      ? (attachedFiles.map(f => f.text || "").join("\n\n").trim().slice(0, 12000) || undefined) : undefined,
     count: selCount(),
     types: selectedQTypes(),
     difficulty: $("#diffChips .chip[aria-pressed='true']")?.textContent.trim() || "Mixed",
@@ -1652,7 +1656,8 @@ async function aiGenerate(promptText){
   return data;
 }
 function loadGeneratedFromAI(promptText, data){
-  const firstLine = (promptText || "").split("\n")[0].trim();
+  let firstLine = (promptText || "").split("\n")[0].trim();
+  firstLine = firstLine.replace(/\.(pdf|docx?|pptx?|txt|md)$/i, "").replace(/[-_]+/g, " ").trim();
   const topicTag = ((firstLine.includes(":") ? firstLine.split(":").pop() : firstLine).trim().split(/\s+/)[0] || "AI");
   const questions = data.questions.map(q => ({
     type: q.type, text: q.text,
@@ -1912,7 +1917,7 @@ function loadGenerated(promptText) {
     : (my ? `${questions.length} soalan digubal — semak dan sunting` : `${questions.length} questions drafted — review and edit anything`));
 }
 function openAssessment(id) {
-  const a = library.find(x => x.id === id);
+  const a = library.find(x => String(x.id) === String(id));
   editor = { title: a ? a.title : "Untitled assessment",
              questions: (a && a.questions && a.questions.length ? a.questions : QBANK.slice(0,5)).map(q => structuredClone(q)) };
   undoStack = []; redoStack = []; $("#qaPanel").hidden = true;
@@ -2120,6 +2125,7 @@ $("#publishBtn").addEventListener("click", () => {
     if (exists) { exists.status = "published"; exists.updated = "just now"; exists.meta = `${editor.questions.length} questions`; exists.questions = structuredClone(editor.questions); }
     else library.unshift({id:Date.now(), emoji:"✨", title:editor.title, meta:`${editor.questions.length} questions`, status:"published", attempts:0, score:0, updated:"just now", questions: structuredClone(editor.questions)});
     renderRecent(); persistStudio();
+    saveAssessmentToServer(editor.title, editor.questions);
   };
   $("#pubDone", lay).addEventListener("click", () => {
     saveToLibrary();
@@ -2702,6 +2708,105 @@ function refreshProviderBadges(){
 })();
 
 /* =================================================================
+   ACCOUNTS — sign in once, your library follows you on any device
+   ================================================================= */
+let currentUser = null;
+function renderAuthUI(){
+  $("#profileBtn").textContent = currentUser ? (currentUser.name || currentUser.email)[0].toUpperCase() : "👤";
+  $("#accountEmail").textContent = currentUser ? currentUser.email : "Not signed in";
+  $("#authActionLabel").textContent = currentUser ? "Sign out" : "Sign in / Create account";
+}
+async function fetchMe(){
+  try {
+    const r = await fetch(LIVE_URL + "/api/auth/me");
+    if (r.ok) currentUser = (await r.json()).user;
+  } catch(e){}
+  renderAuthUI();
+  if (currentUser) syncLibraryFromServer();
+}
+async function syncLibraryFromServer(){
+  try {
+    const r = await fetch(LIVE_URL + "/api/assessments");
+    if (!r.ok) return;
+    (await r.json()).assessments.forEach(a => {
+      const entry = { id: "srv-" + a.id, serverId: a.id, emoji: "☁️", title: a.title,
+        meta: a.questions.length + " questions", status: "published", attempts: 0, score: null,
+        updated: new Date(a.updated_at).toLocaleDateString(), questions: a.questions };
+      const i = library.findIndex(x => x.title === a.title);
+      if (i >= 0) library[i] = Object.assign({}, library[i], entry);
+      else library.unshift(entry);
+    });
+    renderRecent(); if (currentView === "library") renderLibrary();
+    persistStudio();
+  } catch(e){}
+}
+async function saveAssessmentToServer(title, questions){
+  if (!currentUser) return;
+  try {
+    const r = await fetch(LIVE_URL + "/api/assessments", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ title, questions }) });
+    if (r.ok) toast("Saved to your account ☁️ — available on any device");
+  } catch(e){}
+}
+function openAuthModal(){
+  let mode = "login";
+  const fieldCss = "padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:var(--paper);width:100%;font-size:14px";
+  const lay = document.createElement("div");
+  lay.className = "modal-lay";
+  lay.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+    <h2 id="amTitle">Welcome back</h2>
+    <p>Your assessments sync to your account and follow you on any device.</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="amName" placeholder="Your name" hidden style="${fieldCss}">
+      <input id="amEmail" type="email" placeholder="Email" autocomplete="email" style="${fieldCss}">
+      <input id="amPass" type="password" placeholder="Password (min 8 characters)" style="${fieldCss}">
+      <div id="amErr" style="color:var(--crit);font-size:13px;min-height:18px"></div>
+      <button class="btn btn-primary" id="amGo" style="justify-content:center">Sign in</button>
+      <button class="link-btn" id="amSwitch" style="align-self:center">New here? Create an account</button>
+    </div>
+    <div class="modal-actions" style="margin-top:12px"><button class="btn btn-ghost btn-sm" id="amClose">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(lay);
+  const close = () => lay.remove();
+  lay.addEventListener("click", e => { if (e.target === lay) close(); });
+  $("#amClose", lay).addEventListener("click", close);
+  const setMode = m => {
+    mode = m;
+    $("#amTitle", lay).textContent = m === "login" ? "Welcome back" : "Create your account";
+    $("#amName", lay).hidden = m === "login";
+    $("#amGo", lay).textContent = m === "login" ? "Sign in" : "Create account";
+    $("#amSwitch", lay).textContent = m === "login" ? "New here? Create an account" : "Already registered? Sign in";
+  };
+  $("#amSwitch", lay).addEventListener("click", () => setMode(mode === "login" ? "signup" : "login"));
+  $("#amGo", lay).addEventListener("click", async () => {
+    $("#amErr", lay).textContent = "";
+    $("#amGo", lay).disabled = true;
+    try {
+      const r = await fetch(LIVE_URL + "/api/auth/" + mode, { method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: $("#amEmail", lay).value, password: $("#amPass", lay).value, name: $("#amName", lay).value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Something went wrong — try again");
+      currentUser = d.user;
+      renderAuthUI(); syncLibraryFromServer();
+      close();
+      toast(`Welcome${mode === "signup" ? "" : " back"}, ${d.user.name || d.user.email}! Your library now syncs to this account.`);
+    } catch(e){ $("#amErr", lay).textContent = e.message; }
+    $("#amGo", lay).disabled = false;
+  });
+  $("#amPass", lay).addEventListener("keydown", e => { if (e.key === "Enter") $("#amGo", lay).click(); });
+  setTimeout(() => $("#amEmail", lay).focus(), 100);
+}
+$("#authAction").addEventListener("click", async () => {
+  $$(".pop").forEach(x => x.hidden = true);
+  if (!currentUser) { openAuthModal(); return; }
+  await fetch(LIVE_URL + "/api/auth/logout", { method: "POST" }).catch(() => {});
+  currentUser = null;
+  renderAuthUI();
+  toast("Signed out — your work stays saved in your account");
+});
+
+/* =================================================================
    PERSISTENCE — your work survives reloads (saved in this browser)
    ================================================================= */
 function persistStudio(){
@@ -2738,6 +2843,7 @@ setTimeout(renderRecent, 650);
 if (!restored) editor = { title:"Photosynthesis fundamentals", questions: QBANK.slice(0,5).map(q=>structuredClone(q)) };
 renderEditor(); updateUndoBtns();
 if (restored) toast("Welcome back — your assessments were restored");
+fetchMe();
 /* auto-open the student join flow when arriving via a shared #join=CODE link */
 (() => {
   const jm = (location.hash || "").match(/join=([A-Z0-9]{4,8})/i);

@@ -8,9 +8,17 @@
     "dev": "node server.js",
     "bots": "node test/bots.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "express": "^4.19.0",
+    "mammoth": "^1.12.0",
+    "multer": "^2.2.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.22.0",
     "socket.io": "^4.7.0"
   },
   "devDependencies": {

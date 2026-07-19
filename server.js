@@ -5,7 +5,12 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const crypto = require("crypto");
 const { Server } = require("socket.io");
+const cookieParser = require("cookie-parser");
+const multer = require("multer");
+const bcrypt = require("bcryptjs");
+const db = require("./db");
 
 const app = express();
 const server = http.createServer(app);
@@ -13,6 +18,7 @@ const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e6 })
 
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json({ limit: "2mb" }));
+app.use(cookieParser());
 app.get("/join/:code?", (_req, res) => res.sendFile(path.join(__dirname, "public", "join.html")));
 app.get("/studio", (_req, res) => res.sendFile(path.join(__dirname, "public", "studio.html")));
 app.get("/healthz", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
@@ -98,7 +104,137 @@ app.post("/api/generate", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const sessions = new Map(); // code -> session
+const sessions = new Map(); // code -> live quiz session (in-memory)
+
+/* =================================================================
+   ACCOUNTS & PER-USER LIBRARY (Postgres via DATABASE_URL)
+   ================================================================= */
+const COOKIE = "ambit_sess";
+const cookieOpts = { httpOnly: true, sameSite: "lax", secure: !!process.env.RENDER, maxAge: 90 * 24 * 3600 * 1000 };
+const noDb = res => res.status(503).json({ error: "Accounts aren't set up on this server yet (DATABASE_URL missing)." });
+
+async function userFromReq(req) {
+  const pool = db.pool();
+  if (!pool || !req.cookies[COOKIE]) return null;
+  const r = await pool.query(
+    "SELECT u.id, u.email, u.name FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.expires_at > now()",
+    [req.cookies[COOKIE]]);
+  return r.rows[0] || null;
+}
+async function startSession(res, userId) {
+  const token = crypto.randomBytes(24).toString("hex");
+  await db.pool().query("INSERT INTO auth_sessions(token, user_id, expires_at) VALUES ($1, $2, now() + interval '90 days')", [token, userId]);
+  res.cookie(COOKIE, token, cookieOpts);
+}
+
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    if (!db.pool()) return noDb(res);
+    const email = String((req.body || {}).email || "").trim().toLowerCase();
+    const name = clean((req.body || {}).name, 60) || email.split("@")[0];
+    const password = String((req.body || {}).password || "");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: "Enter a valid email address." });
+    if (password.length < 8) return res.status(400).json({ error: "Password needs at least 8 characters." });
+    const hash = await bcrypt.hash(password, 10);
+    const r = await db.pool().query(
+      "INSERT INTO users(email, name, pass_hash) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id, email, name",
+      [email, name, hash]);
+    if (!r.rows[0]) return res.status(409).json({ error: "That email already has an account — log in instead." });
+    await startSession(res, r.rows[0].id);
+    res.json({ user: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: "Signup failed: " + e.message }); }
+});
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    if (!db.pool()) return noDb(res);
+    const email = String((req.body || {}).email || "").trim().toLowerCase();
+    const password = String((req.body || {}).password || "");
+    const r = await db.pool().query("SELECT id, email, name, pass_hash FROM users WHERE email = $1", [email]);
+    const u = r.rows[0];
+    if (!u || !(await bcrypt.compare(password, u.pass_hash)))
+      return res.status(401).json({ error: "Wrong email or password." });
+    await startSession(res, u.id);
+    res.json({ user: { id: u.id, email: u.email, name: u.name } });
+  } catch (e) { res.status(500).json({ error: "Login failed: " + e.message }); }
+});
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    if (db.pool() && req.cookies[COOKIE])
+      await db.pool().query("DELETE FROM auth_sessions WHERE token = $1", [req.cookies[COOKIE]]);
+  } catch (e) { /* best effort */ }
+  res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax", secure: !!process.env.RENDER });
+  res.json({ ok: true });
+});
+app.get("/api/auth/me", async (req, res) => {
+  try {
+    const user = await userFromReq(req);
+    if (!user) return res.status(401).json({ error: "Not signed in." });
+    res.json({ user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* cloud library — each user sees only their own assessments */
+app.get("/api/assessments", async (req, res) => {
+  try {
+    const user = await userFromReq(req);
+    if (!user) return res.status(401).json({ error: "Sign in to use your cloud library." });
+    const r = await db.pool().query(
+      "SELECT id, title, questions, updated_at FROM assessments WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 100", [user.id]);
+    res.json({ assessments: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/api/assessments", async (req, res) => {
+  try {
+    const user = await userFromReq(req);
+    if (!user) return res.status(401).json({ error: "Sign in to save to your account." });
+    const title = clean((req.body || {}).title, 150) || "Untitled assessment";
+    const questions = Array.isArray((req.body || {}).questions) ? req.body.questions.slice(0, 150) : null;
+    if (!questions || !questions.length) return res.status(400).json({ error: "No questions to save." });
+    const r = await db.pool().query(
+      `INSERT INTO assessments(user_id, title, questions) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, title) DO UPDATE SET questions = $3, updated_at = now()
+       RETURNING id, title, updated_at`,
+      [user.id, title, JSON.stringify(questions)]);
+    res.json({ assessment: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/api/assessments/:id", async (req, res) => {
+  try {
+    const user = await userFromReq(req);
+    if (!user) return res.status(401).json({ error: "Not signed in." });
+    await db.pool().query("DELETE FROM assessments WHERE id = $1 AND user_id = $2", [+req.params.id || 0, user.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* document text extraction: PDF, DOCX, TXT, MD */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+app.post("/api/extract", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file received." });
+    const name = req.file.originalname || "file";
+    const buf = req.file.buffer;
+    let text = "";
+    if (/\.pdf$/i.test(name) || req.file.mimetype === "application/pdf") {
+      const { PDFParse } = require("pdf-parse");
+      const parser = new PDFParse({ data: new Uint8Array(buf) });
+      const out = await parser.getText();
+      text = out.text || "";
+    } else if (/\.docx$/i.test(name)) {
+      const mammoth = require("mammoth");
+      text = (await mammoth.extractRawText({ buffer: buf })).value || "";
+    } else if (/\.(txt|md|markdown|csv)$/i.test(name) || /^text\//.test(req.file.mimetype)) {
+      text = buf.toString("utf8");
+    } else {
+      return res.status(415).json({ error: "Can't read this format yet — PDF, DOCX, TXT and MD are supported. (Slides: export as PDF first.)" });
+    }
+    text = text.replace(/\s+\n/g, "\n").replace(/[ \t]+/g, " ").trim().slice(0, 100000);
+    if (text.length < 40) return res.status(422).json({ error: "No readable text found — scanned/image PDFs need OCR, which isn't supported yet." });
+    res.json({ name, chars: text.length, text });
+  } catch (e) { res.status(500).json({ error: "Extraction failed: " + e.message }); }
+});
+
+db.init().catch(e => console.error("DB init failed:", e.message));
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 function makeCode() {

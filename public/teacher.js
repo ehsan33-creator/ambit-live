@@ -256,6 +256,29 @@ function esc(s) { const d = document.createElement("div"); d.textContent = Strin
 reparse();
 renderLib();
 
+/* ---------- cloud library (signed-in account, synced from the studio) ---------- */
+let cloudRows = [];
+async function renderCloudLib() {
+  try {
+    const r = await fetch("/api/assessments");
+    if (!r.ok) return;
+    cloudRows = (await r.json()).assessments;
+    if (!cloudRows.length) return;
+    $("#libBox").hidden = false;
+    $("#libList").insertAdjacentHTML("afterbegin", cloudRows.map((a, i) => `<div class="row" style="border:1px solid var(--accent);border-radius:12px;padding:9px 12px;justify-content:space-between">
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis"><b>☁️ ${esc(a.title)}</b><span class="muted"> · ${a.questions.length} questions · account</span></span>
+      <button class="chip" data-cloudload="${i}">Load</button></div>`).join(""));
+    $$("[data-cloudload]").forEach(b => b.onclick = () => {
+      const a = cloudRows[+b.dataset.cloudload];
+      $("#title").value = a.title;
+      $("#qtext").value = questionsToText(a.questions);
+      reparse(); window.scrollTo(0, 0);
+      toast("Loaded from your account — press Start session to host it");
+    });
+  } catch (e) { /* not signed in or no DB — local library still works */ }
+}
+renderCloudLib();
+
 /* ---------- resume a running session after refresh/reconnect ---------- */
 function tryResume() {
   let saved; try { saved = JSON.parse(localStorage.getItem("ambitLiveHost") || "null"); } catch (e) {}
