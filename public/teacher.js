@@ -250,6 +250,17 @@ $("#csvBtn").addEventListener("click", () => {
 });
 $("#againBtn").addEventListener("click", () => location.reload());
 
+/* flashcards from the finished session — study link is WhatsApp-shareable */
+const encPayload = o => encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(o)))));
+$("#cardsBtn").addEventListener("click", () => {
+  if (!lastReport || !Array.isArray(lastReport.cards) || !lastReport.cards.length)
+    return toast("No flashcards available for this session");
+  const url = location.origin + "/cards#c=" + encPayload({ title: lastReport.title, cards: lastReport.cards });
+  navigator.clipboard?.writeText(`🃏 ${lastReport.title} — revision flashcards!\nStudy here: ${url}`);
+  window.open(url, "_blank");
+  toast("Flashcards created — share message copied, paste it in your class group");
+});
+
 socket.on("disconnect", () => toast("Connection lost — reconnecting…"));
 
 function esc(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }

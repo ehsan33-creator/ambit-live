@@ -21,6 +21,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.get("/join/:code?", (_req, res) => res.sendFile(path.join(__dirname, "public", "join.html")));
 app.get("/studio", (_req, res) => res.sendFile(path.join(__dirname, "public", "studio.html")));
+app.get("/cards", (_req, res) => res.sendFile(path.join(__dirname, "public", "cards.html")));
 app.get("/healthz", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
 
 /* ---- real AI generation via the user's AI Hub key (Anthropic Messages API) ---- */
@@ -399,10 +400,12 @@ function endSession(s) {
   s.phase = "ended";
   const stats = s.qstats.filter(Boolean);
   const players = [...s.players.values()].sort((a, b) => b.score - a.score);
+  const cardOf = q => ({ front: q.text, back: q.opts ? q.opts[q.correct] : (q.answer || ""), expl: q.expl || "" });
   io.to(hostRoom(s)).emit("ended", {
     title: s.title, code: s.code,
     avgAcc: stats.length ? Math.round(stats.reduce((a, x) => a + x.acc, 0) / stats.length) : 0,
     questions: stats,
+    cards: s.questions.map(cardOf),
     players: players.map(p => ({ nick: p.nick, score: p.score, correct: p.correct,
       answers: p.answers.map(a => a ? { given: a.given, right: a.right } : null) })),
   });
@@ -413,7 +416,13 @@ function endSession(s) {
       if (sock) sock.emit("ended", {
         nick: p.nick, score: p.score, rank: idx + 1, of: players.length,
         correct: p.correct, total: stats.length,
-        review: stats.map((qs, i) => ({ text: qs.text, given: p.answers[i] ? p.answers[i].given : null, right: !!(p.answers[i] && p.answers[i].right) })),
+        review: stats.map((qs, i) => ({
+          text: qs.text,
+          given: p.answers[i] ? p.answers[i].given : null,
+          right: !!(p.answers[i] && p.answers[i].right),
+          answer: s.questions[i] ? (s.questions[i].opts ? s.questions[i].opts[s.questions[i].correct] : (s.questions[i].answer || "")) : "",
+          expl: s.questions[i] ? (s.questions[i].expl || "") : "",
+        })),
       });
     }
   });

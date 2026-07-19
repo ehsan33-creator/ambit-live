@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Flashcards — Ambit</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#1E7A62">
+<style>
+  .wrap{max-width:520px}
+  .fc{perspective:1200px;cursor:pointer;margin-top:16px;-webkit-tap-highlight-color:transparent}
+  .fc-inner{position:relative;width:100%;height:340px;transition:transform .45s;transform-style:preserve-3d}
+  .fc.flipped .fc-inner{transform:rotateY(180deg)}
+  .fc-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:var(--surface);border:1px solid var(--line-soft);border-radius:22px;box-shadow:var(--shadow-1);padding:26px;display:flex;flex-direction:column;gap:12px;justify-content:center;text-align:center;overflow-y:auto}
+  .fc-back{transform:rotateY(180deg);border-color:var(--accent)}
+  .fc-text{font-family:var(--font-display);font-size:19px;font-weight:600;line-height:1.4;text-wrap:balance}
+  .fc-expl{font-size:13px;color:var(--ink-2)}
+  @media (prefers-reduced-motion: reduce){ .fc-inner{transition:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand" style="justify-content:center"><div class="brand-mark">A</div><div class="brand-name">Ambit</div><span class="tag">Cards</span></div>
+
+  <section id="study" hidden>
+    <div class="run-meta" style="justify-content:center;gap:10px">
+      <span class="pill pill-accent" id="cTitle">Flashcards</span>
+      <span class="pill pill-neutral" id="cLeft"></span>
+    </div>
+    <div class="fc" id="card" role="button" tabindex="0" aria-label="Flashcard — tap to flip">
+      <div class="fc-inner" id="cardInner">
+        <div class="fc-face">
+          <div class="eyebrow">Question · tap to flip</div>
+          <div class="fc-text" id="cFront"></div>
+        </div>
+        <div class="fc-face fc-back">
+          <div class="eyebrow" style="color:var(--accent)">Answer</div>
+          <div class="fc-text" id="cBack"></div>
+          <div class="fc-expl" id="cExpl"></div>
+        </div>
+      </div>
+    </div>
+    <div class="row" id="judge" style="justify-content:center;gap:12px;margin-top:18px;visibility:hidden">
+      <button class="btn btn-ghost" id="againBtn">↻ Again</button>
+      <button class="btn btn-primary" id="gotBtn">✓ Got it</button>
+    </div>
+    <p class="muted center" style="margin-top:14px">Tap the card to flip · “Again” puts it back in the deck</p>
+  </section>
+
+  <section id="done" class="card center" hidden>
+    <h2 style="font-size:20px">Deck complete 🎉</h2>
+    <p class="muted" id="doneStats"></p>
+    <button class="btn btn-primary" id="restartBtn" style="margin-top:8px">Study again</button>
+  </section>
+
+  <section id="bad" class="card center" hidden>
+    <h2 style="font-size:18px">No flashcards in this link</h2>
+    <p class="muted">Ask your teacher to share the flashcards link again.</p>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let deck = null;
+try {
+  const m = location.hash.match(/#c=(.+)/);
+  if (m) deck = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+} catch (e) {}
+
+if (!deck || !Array.isArray(deck.cards) || !deck.cards.length) {
+  $("#bad").hidden = false;
+} else {
+  const total = deck.cards.length;
+  let queue = [...deck.cards];
+  let flipped = false, rounds = 0;
+  $("#study").hidden = false;
+  $("#cTitle").textContent = (deck.title || "Flashcards").slice(0, 40);
+
+  function render() {
+    const c = queue[0];
+    $("#cFront").textContent = c.front;
+    $("#cBack").textContent = c.back || "—";
+    $("#cExpl").textContent = c.expl || "";
+    $("#cLeft").textContent = queue.length + " card" + (queue.length === 1 ? "" : "s") + " left";
+    flipped = false;
+    $("#card").classList.remove("flipped");
+    $("#judge").style.visibility = "hidden";
+  }
+  function flip() {
+    flipped = !flipped;
+    $("#card").classList.toggle("flipped", flipped);
+    if (flipped) $("#judge").style.visibility = "visible";
+  }
+  function nextOrDone() {
+    if (!queue.length) {
+      $("#study").hidden = true;
+      $("#done").hidden = false;
+      $("#doneStats").textContent = `${total} cards mastered · ${rounds} extra repeats`;
+      return;
+    }
+    render();
+  }
+  $("#card").addEventListener("click", flip);
+  $("#card").addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); flip(); } });
+  $("#againBtn").addEventListener("click", () => { rounds++; queue.push(queue.shift()); nextOrDone(); });
+  $("#gotBtn").addEventListener("click", () => { queue.shift(); nextOrDone(); });
+  $("#restartBtn").addEventListener("click", () => {
+    queue = [...deck.cards]; rounds = 0;
+    $("#done").hidden = true; $("#study").hidden = false;
+    render();
+  });
+  render();
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
+</script>
+</body>
+</html>

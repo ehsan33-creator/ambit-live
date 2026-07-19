@@ -148,6 +148,17 @@ socket.on("ended", rep => {
     <div class="review-item"><span>${r.right ? "✅" : "❌"}</span>
       <span>${esc(r.text)}${r.given != null ? `<small>Your answer: ${esc(r.given)}</small>` : `<small>No answer</small>`}</span>
     </div>`).join("");
+  // practice flashcards — the ones you missed come first
+  const withAnswers = rep.review.filter(r => r.answer);
+  if (withAnswers.length) {
+    const cards = [...withAnswers]
+      .sort((a, b) => (a.right ? 1 : 0) - (b.right ? 1 : 0))
+      .map(r => ({ front: r.text, back: r.answer, expl: r.expl || "" }));
+    const enc = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({ title: "Ulangkaji — " + (me ? me.title : "quiz"), cards })))));
+    const a = $("#endCards");
+    a.href = "/cards#c=" + enc;
+    a.hidden = false;
+  }
   sessionStorage.removeItem("ambit-live");
 });
 
