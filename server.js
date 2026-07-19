@@ -12,9 +12,90 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 1e6 });
 
 app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json({ limit: "2mb" }));
 app.get("/join/:code?", (_req, res) => res.sendFile(path.join(__dirname, "public", "join.html")));
 app.get("/studio", (_req, res) => res.sendFile(path.join(__dirname, "public", "studio.html")));
 app.get("/healthz", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
+
+/* ---- real AI generation via the user's AI Hub key (Anthropic Messages API) ---- */
+const AI_HUB_URL = process.env.AI_HUB_URL || "https://ai-hub.aicampus.my/v1/messages";
+app.options("/api/generate", (_req, res) => res
+  .set("Access-Control-Allow-Origin", "*")
+  .set("Access-Control-Allow-Headers", "content-type, x-ai-key")
+  .set("Access-Control-Allow-Methods", "POST, OPTIONS").sendStatus(204));
+app.post("/api/generate", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  try {
+    const key = process.env.AI_HUB_KEY || req.get("x-ai-key") || "";
+    if (!key) return res.status(401).json({ error: "No AI key — connect your AI Hub key in Studio → Settings." });
+    const b = req.body || {};
+    const model = String(b.model || "deepseek-v4-flash").slice(0, 60);
+    const callHub = async payload => {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 90000);
+      const r = await fetch(AI_HUB_URL, {
+        method: "POST", signal: ctl.signal,
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify(payload),
+      }).finally(() => clearTimeout(t));
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((data.error && data.error.message) || `AI Hub responded ${r.status}`);
+      return data;
+    };
+    if (b.test) {
+      const data = await callHub({ model, max_tokens: 30, messages: [{ role: "user", content: "Reply with exactly: OK" }] });
+      return res.json({ ok: true, model: data.model || model });
+    }
+    const n = Math.min(Math.max(+b.count || 10, 1), 40);
+    const language = String(b.language || "English").slice(0, 40);
+    const types = (Array.isArray(b.types) && b.types.length ? b.types : ["mcq", "short"]).filter(t => ["mcq", "tf", "short"].includes(t));
+    let source = String(b.source || "").slice(0, 12000);
+    if (!source && b.url && /^https?:\/\//i.test(b.url)) {
+      try {
+        const page = await fetch(b.url, { redirect: "follow", headers: { "user-agent": "AmbitLive/1.0" } });
+        source = (await page.text())
+          .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12000);
+      } catch (e) { /* generate from topic alone */ }
+    }
+    const sys = "You write high-quality classroom assessment questions. Respond with ONLY a valid JSON array — no markdown fences, no commentary before or after.";
+    const user = [
+      `Write exactly ${n} assessment questions in ${language}.`,
+      `Topic: ${String(b.topic || "").slice(0, 300)}`,
+      b.prompt ? `Teacher's instructions:\n${String(b.prompt).slice(0, 4000)}` : "",
+      source ? `Base the questions strictly on this source material:\n${source}` : "",
+      `Question types to mix: ${types.join(", ")} (mcq = 4-option multiple choice; tf = true/false; short = short written answer).`,
+      `Difficulty: ${String(b.difficulty || "Mixed").slice(0, 20)}.`,
+      `Each array item must be exactly one of:`,
+      `{"type":"mcq","text":"…","opts":["…","…","…","…"],"correct":0,"expl":"…","diff":"Easy|Medium|Hard","bloom":"Remember|Understand|Apply|Analyze|Evaluate|Create"}`,
+      `{"type":"tf","text":"…","opts":["<true in ${language}>","<false in ${language}>"],"correct":0,"expl":"…","diff":"…","bloom":"…"}`,
+      `{"type":"short","text":"…","answer":"model answer","expl":"…","diff":"…","bloom":"…"}`,
+      `Rules: factually accurate; exactly one correct option; plausible distractors of similar length; "correct" is the 0-based index and its position must vary across questions; explanations are one sentence; every string in ${language}.`,
+    ].filter(Boolean).join("\n");
+    const data = await callHub({ model, max_tokens: 8000, system: sys, messages: [{ role: "user", content: user }] });
+    const text = (data.content || []).filter(c => c.type === "text").map(c => c.text || "").join("");
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return res.status(502).json({ error: "The model did not return questions — try again or switch model." });
+    const raw = JSON.parse(match[0]);
+    const questions = raw.map(q => {
+      const type = ["mcq", "tf", "short"].includes(q.type) ? q.type : (Array.isArray(q.opts) ? "mcq" : "short");
+      const opts = type === "short" ? null : (Array.isArray(q.opts) ? q.opts.slice(0, 6).map(o => clean(o, 200)).filter(Boolean) : null);
+      return {
+        type, text: clean(q.text, 500),
+        opts,
+        correct: opts ? Math.min(Math.max(0, q.correct | 0), opts.length - 1) : null,
+        answer: type === "short" ? clean(q.answer, 600) : null,
+        expl: clean(q.expl, 600),
+        diff: ["Easy", "Medium", "Hard"].includes(q.diff) ? q.diff : "Medium",
+        bloom: ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"].includes(q.bloom) ? q.bloom : "Understand",
+      };
+    }).filter(q => q.text && (q.opts ? q.opts.length >= 2 : q.answer));
+    if (!questions.length) return res.status(502).json({ error: "The model returned an unusable format — try again." });
+    res.json({ questions, model: data.model || model, usage: data.usage || null });
+  } catch (e) {
+    res.status(500).json({ error: e.name === "AbortError" ? "AI Hub timed out — try again." : e.message });
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 const sessions = new Map(); // code -> session
