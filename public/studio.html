@@ -1169,20 +1169,20 @@ a.btn{text-decoration:none}
           <div style="font-size:12px;color:var(--ink-3)">Powers real AI generation. The key is stored only in this browser and sent through your own Ambit server.</div>
         </div>
         <div class="card provider-card">
-          <div class="p-head"><div class="p-logo">A\</div><h3>Anthropic</h3><span class="pill pill-good">Connected</span></div>
+          <div class="p-head"><div class="p-logo">A\</div><h3>Anthropic <small style="color:var(--ink-3);font-weight:400">· demo</small></h3><span class="pill pill-neutral">Demo</span></div>
           <div class="key-row"><input readonly value="sk-ant-••••••••••••3kF9" aria-label="Anthropic API key (masked)"><button class="btn btn-ghost btn-sm test-key">Test</button></div>
           <div class="two-col" style="font-size:12.5px;color:var(--ink-2)"><span>Default model: <b>Sonnet 5</b></span><span>12 models discovered</span></div>
         </div>
         <div class="card provider-card">
-          <div class="p-head"><div class="p-logo">◯</div><h3>OpenAI</h3><span class="pill pill-neutral">Not connected</span></div>
+          <div class="p-head"><div class="p-logo">◯</div><h3>OpenAI <small style="color:var(--ink-3);font-weight:400">· demo</small></h3><span class="pill pill-neutral">Demo</span></div>
           <div class="key-row"><input placeholder="sk-…" aria-label="OpenAI API key"><button class="btn btn-ghost btn-sm connect-key">Connect</button></div>
         </div>
         <div class="card provider-card">
-          <div class="p-head"><div class="p-logo">G</div><h3>Google AI</h3><span class="pill pill-neutral">Not connected</span></div>
+          <div class="p-head"><div class="p-logo">G</div><h3>Google AI <small style="color:var(--ink-3);font-weight:400">· demo</small></h3><span class="pill pill-neutral">Demo</span></div>
           <div class="key-row"><input placeholder="AIza…" aria-label="Google AI API key"><button class="btn btn-ghost btn-sm connect-key">Connect</button></div>
         </div>
         <div class="card provider-card">
-          <div class="p-head"><div class="p-logo">⇄</div><h3>OpenRouter</h3><span class="pill pill-neutral">Not connected</span></div>
+          <div class="p-head"><div class="p-logo">⇄</div><h3>OpenRouter <small style="color:var(--ink-3);font-weight:400">· demo</small></h3><span class="pill pill-neutral">Demo</span></div>
           <div class="key-row"><input placeholder="sk-or-…" aria-label="OpenRouter API key"><button class="btn btn-ghost btn-sm connect-key">Connect</button></div>
         </div>
       </div>
@@ -2634,20 +2634,22 @@ $("#landCode").addEventListener("keydown", e => { if (e.key === "Enter") $("#lan
 
 /* budget slider */
 $("#budgetRange").addEventListener("input", e => $("#budgetVal").textContent = "$" + e.target.value);
-$$(".test-key").forEach(b => b.addEventListener("click", () => { b.textContent = "Testing…"; setTimeout(() => { b.textContent = "Test"; toast("Connection OK — 128 ms · 12 models available"); }, 800); }));
-$$(".connect-key").forEach(b => b.addEventListener("click", () => {
-  const input = b.parentElement.querySelector("input");
-  if (!input.value.trim()) { toast("Paste an API key first — it will be encrypted at rest"); input.focus(); return; }
-  const card = b.closest(".provider-card");
-  card.querySelector(".pill").className = "pill pill-good"; card.querySelector(".pill").textContent = "Connected";
-  input.value = input.value.slice(0,6) + "••••••••••••" + input.value.slice(-4); input.readOnly = true;
-  b.textContent = "Test"; b.classList.replace("connect-key","test-key");
-  b.addEventListener("click", () => toast("Connection OK"));
-  toast("Key validated & encrypted — models discovered");
-}));
+$$(".test-key").forEach(b => b.addEventListener("click", () => toast("This card is a demo — use the AI Hub card for real generation")));
+$$(".connect-key").forEach(b => b.addEventListener("click", () =>
+  toast("This card is a demo — paste your real key in the 🎓 AI Hub card instead")));
 $("#dlReport").addEventListener("click", () => toast("Usage report (CSV) downloading"));
 
 /* ---------- AI Hub connection ---------- */
+function refreshProviderBadges(){
+  const key = localStorage.getItem("aiHubKey");
+  const model = localStorage.getItem("aiHubModel") || "deepseek-v4-flash";
+  const pill = $(".provider-pill");
+  if (pill) pill.innerHTML = key
+    ? `<span class="status-dot"></span>AI Hub · ${model}`
+    : `<span class="status-dot" style="background:var(--warn)"></span>No AI connected · Settings`;
+  const rows = $$(".rail-meta .row b");
+  if (rows.length >= 2) { rows[0].textContent = key ? "AI Hub" : "—"; rows[1].textContent = key ? model : "not connected"; }
+}
 (function initAiHub(){
   const keyInput = $("#aihubKey"), status = $("#aihubStatus"), modelSel = $("#aihubModel"), saveBtn = $("#aihubSave");
   if (!keyInput) return;
@@ -2663,14 +2665,17 @@ $("#dlReport").addEventListener("click", () => toast("Usage report (CSV) downloa
   if (savedModel) modelSel.value = savedModel;
   modelSel.addEventListener("change", () => {
     localStorage.setItem("aiHubModel", modelSel.value);
+    refreshProviderBadges();
     toast("Default model: " + modelSel.value);
   });
+  refreshProviderBadges();
   saveBtn.addEventListener("click", async () => {
     if (keyInput.readOnly) {
       localStorage.removeItem("aiHubKey");
       keyInput.readOnly = false; keyInput.value = "";
       status.className = "pill pill-neutral"; status.textContent = "Not connected";
       saveBtn.textContent = "Connect";
+      refreshProviderBadges();
       toast("Disconnected — generation falls back to local drafts");
       return;
     }
@@ -2687,6 +2692,7 @@ $("#dlReport").addEventListener("click", () => toast("Usage report (CSV) downloa
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       localStorage.setItem("aiHubKey", k);
       setConnected(k);
+      refreshProviderBadges();
       toast("AI Hub connected ✓ — generation now uses real AI (" + (d.model || modelSel.value) + ")");
     } catch (e) {
       saveBtn.textContent = "Connect";
