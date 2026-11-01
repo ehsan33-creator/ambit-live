@@ -28,7 +28,10 @@ node test/bots.js <CODE> 8      # or: 8 bots join YOUR live session
 
 Numbered questions with `Jawapan:` / `Answer:` lines. `A)`–`D)` lines become
 multiple choice (the answer letter marks the correct option); otherwise the
-answer text becomes a **typed answer**, auto-marked by keyword match.
+answer text becomes a **typed answer**, marked forgivingly (see below). Optional
+rubric lines follow the answer: `Terima:` / `Accept:` lists other correct answers
+(`|`-separated) and `Kunci (n):` / `Keywords (n):` lists key ideas (`,`-separated,
+`/` for synonyms) of which `n` are needed. AI-generated questions include one.
 
 ```
 1. Negara kita merdeka pada tahun berapa?
@@ -69,5 +72,7 @@ The app is a single Node server with WebSockets — deploy to any Node host:
 - Scoring: 100 points per correct answer + up to 100 speed bonus.
 - Reconnects: students who drop (locked phone screen) auto-rejoin and keep
   their score; a same-nickname rejoin resumes the seat.
-- Typed answers are marked by normalized keyword overlap (≥35% of the model
-  answer's words) — review the streamed answers on the teacher dashboard.
+- Typed answers (`grade.js`) ignore case, spacing, brackets, punctuation and
+  accents and allow small typos. Correct = matches the model or an accepted
+  answer, or covers the rubric's key ideas; with no rubric, bullet points act
+  as key ideas, else ≥35% word overlap. Review streamed answers on the dashboard.

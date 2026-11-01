@@ -1655,6 +1655,14 @@ async function aiGenerate(promptText){
   if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
   return data;
 }
+/* marking rubric under a short answer: other accepted answers + key ideas */
+function rubricNote(r){
+  if (!r) return "";
+  const bits = [];
+  if (r.accept && r.accept.length) bits.push("<b>Also accepts:</b> " + r.accept.join(" · "));
+  if (r.keys && r.keys.length) bits.push(`<b>Key ideas (${r.min || 1} needed):</b> ` + r.keys.map(k => k.join(" / ")).join(", "));
+  return bits.length ? `<div class="rubric" style="margin-top:6px;font-size:.85em;opacity:.75">${bits.join("<br>")}</div>` : "";
+}
 function loadGeneratedFromAI(promptText, data){
   let firstLine = (promptText || "").split("\n")[0].trim();
   firstLine = firstLine.replace(/\.(pdf|docx?|pptx?|txt|md)$/i, "").replace(/[-_]+/g, " ").trim();
@@ -1664,6 +1672,7 @@ function loadGeneratedFromAI(promptText, data){
     opts: q.opts || undefined,
     correct: q.opts ? q.correct : undefined,
     answer: q.type === "short" ? q.answer : undefined,
+    rubric: q.type === "short" ? q.rubric || undefined : undefined,
     diff: q.diff, pts: q.diff === "Hard" ? 3 : q.diff === "Easy" ? 1 : 2,
     bloom: q.bloom, tags: [topicTag], mins: q.type === "short" ? 2 : 1,
     expl: q.expl || "",
@@ -1945,7 +1954,7 @@ function renderEditor() {
     </div>
     <div class="q-text" contenteditable="${!q.locked}" data-qtext="${qi}" spellcheck="false">${q.text}</div>
     ${q.type === "short"
-      ? `<div class="short-ans"><b>Expected answer:</b> <span contenteditable="${!q.locked}" data-ans="${qi}">${q.answer}</span></div>`
+      ? `<div class="short-ans"><b>Expected answer:</b> <span contenteditable="${!q.locked}" data-ans="${qi}">${q.answer}</span>${rubricNote(q.rubric)}</div>`
       : `<div class="opts">${q.opts.map((o, oi) => `
         <div class="opt ${q.correct === oi ? "correct" : ""}">
           <button class="mark" data-mark="${qi}:${oi}" aria-label="Mark option ${oi+1} as correct" aria-pressed="${q.correct===oi}" ${q.locked?"disabled":""}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></button>
@@ -2290,7 +2299,7 @@ function studioLiveSettings(){
 function openAmbitLive(title, qs){
   const payload = { title, settings: studioLiveSettings(), questions: (qs || []).slice(0, 100).map(q => q.opts
     ? { text: q.text, opts: q.opts, correct: q.correct, expl: q.expl || "" }
-    : { text: q.text, answer: q.answer || "", expl: q.expl || "" }) };
+    : { text: q.text, answer: q.answer || "", rubric: q.rubric || undefined, expl: q.expl || "" }) };
   if (!payload.questions.length) { toast("No questions to host yet — generate or open an assessment first"); return; }
   const b64 = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
   const url = LIVE_URL + "/#q=" + b64;

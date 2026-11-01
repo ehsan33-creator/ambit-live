@@ -3,7 +3,10 @@
  *  1) Numbered Q&A text:  "1. Question…\nJawapan: …"  (or "Answer:")
  *     - A)–D) option lines become multiple choice; the answer letter marks correct.
  *     - Otherwise the answer text becomes a typed-answer question (fuzzy-marked).
- *  2) JSON array: [{text, opts?, correct?, answer?, expl?}, …]
+ *     - Optional rubric lines after the answer (marking stays forgiving either way):
+ *         Terima: other | accepted | answers        (or "Accept:")
+ *         Kunci (2): idea/synonym, idea, idea       (or "Keywords:"; number = how many needed)
+ *  2) JSON array: [{text, opts?, correct?, answer?, rubric?, expl?}, …]
  */
 function parseQuestions(raw) {
   const text = String(raw || "").trim();
@@ -21,7 +24,14 @@ function parseQuestions(raw) {
     if (!m) continue;
     const parts = m[1].split(/\n\s*(?:jawapan|answer|ans)\s*[:：]?\s*/i);
     const qpart = parts[0].trim();
-    const ans = (parts.slice(1).join(" ") || "").trim();
+    let ans = (parts.slice(1).join(" ") || "").trim();
+    const rubric = {};
+    ans = ans.replace(/^\s*(?:terima|accept)\s*[:：]\s*(.+)$/gim, (_, v) => {
+      rubric.accept = v.split("|").map(s => s.trim()).filter(Boolean); return "";
+    }).replace(/^\s*(?:kunci|keywords?)\s*(?:\((\d+)\))?\s*[:：]\s*(.+)$/gim, (_, n, v) => {
+      rubric.keys = v.split(",").map(k => k.split("/").map(s => s.trim()).filter(Boolean)).filter(k => k.length);
+      rubric.min = +n || 1; return "";
+    }).trim();
     if (!qpart) continue;
     const optLines = [...qpart.matchAll(/^\s*([A-D])[.)]\s*(.+)$/gm)];
     if (optLines.length >= 2) {
@@ -33,6 +43,7 @@ function parseQuestions(raw) {
     } else if (ans) {
       qs.push({ text: qpart.replace(/\s*\n+\s*/g, " "),
                 answer: ans.replace(/\n\s*[-•]\s*/g, " • ").replace(/\s*\n+\s*/g, " "),
+                rubric: rubric.accept || rubric.keys ? rubric : undefined,
                 expl: "" });
     }
   }

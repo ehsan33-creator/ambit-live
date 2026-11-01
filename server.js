@@ -11,6 +11,7 @@ const cookieParser = require("cookie-parser");
 const multer = require("multer");
 const bcrypt = require("bcryptjs");
 const db = require("./db");
+const { isCorrect, cleanRubric } = require("./grade");
 
 const app = express();
 const server = http.createServer(app);
@@ -76,7 +77,8 @@ app.post("/api/generate", async (req, res) => {
       `Each array item must be exactly one of:`,
       `{"type":"mcq","text":"…","opts":["…","…","…","…"],"correct":0,"expl":"…","diff":"Easy|Medium|Hard","bloom":"Remember|Understand|Apply|Analyze|Evaluate|Create"}`,
       `{"type":"tf","text":"…","opts":["<true in ${language}>","<false in ${language}>"],"correct":0,"expl":"…","diff":"…","bloom":"…"}`,
-      `{"type":"short","text":"…","answer":"model answer","expl":"…","diff":"…","bloom":"…"}`,
+      `{"type":"short","text":"…","answer":"model answer","rubric":{"accept":["…"],"keys":[["key idea","synonym"],["…"]],"min":1},"expl":"…","diff":"…","bloom":"…"}`,
+      `Short-answer marking rubric (students type on phones, so mark generously): "accept" lists other fully-correct answers — synonyms, abbreviations, common spellings, the answer with or without units/symbols; "keys" lists the 1–3 word key ideas a teacher would look for, each with its synonyms; "min" is how many keys earn full marks (e.g. 2 for "state two…", otherwise 1). Never require exact wording.`,
       `Rules: factually accurate; exactly one correct option; plausible distractors of similar length; "correct" is the 0-based index and its position must vary across questions; explanations are one sentence; every string in ${language}.`,
     ].filter(Boolean).join("\n");
     const data = await callHub({ model, max_tokens: 8000, system: sys, messages: [{ role: "user", content: user }] });
@@ -92,6 +94,7 @@ app.post("/api/generate", async (req, res) => {
         opts,
         correct: opts ? Math.min(Math.max(0, q.correct | 0), opts.length - 1) : null,
         answer: type === "short" ? clean(q.answer, 600) : null,
+        rubric: type === "short" ? cleanRubric(q.rubric, clean) : null,
         expl: clean(q.expl, 600),
         diff: ["Easy", "Medium", "Hard"].includes(q.diff) ? q.diff : "Medium",
         bloom: ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"].includes(q.bloom) ? q.bloom : "Understand",
@@ -246,18 +249,6 @@ function makeCode() {
 }
 const clean = (s, n) => String(s || "").replace(/[<>]/g, "").trim().slice(0, n);
 
-/* Fuzzy match for typed answers: correct when the student's words cover
- * enough of the model answer's meaningful words. */
-const normWords = s => String(s || "").toLowerCase().normalize("NFKD")
-  .replace(/[^a-z0-9À-ɏ\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
-function fuzzyCorrect(student, model) {
-  const sw = new Set(normWords(student));
-  const mw = normWords(model);
-  if (!mw.length || !sw.size) return false;
-  const hits = mw.filter(w => sw.has(w)).length;
-  return hits / mw.length >= 0.35;
-}
-
 const connectedCount = s => [...s.players.values()].filter(p => p.connected).length;
 const hostRoom = s => s.code + ":host";
 function publicQuestion(s) {
@@ -301,7 +292,7 @@ function reveal(s) {
     const a = s.cur.answers.get(sid);
     let right = false;
     if (a) {
-      right = q.opts ? a.oi === q.correct : fuzzyCorrect(a.text, q.answer);
+      right = q.opts ? a.oi === q.correct : isCorrect(a.text, q);
       if (right) {
         nRight++;
         p.correct++;
@@ -369,7 +360,7 @@ function pacedAnswer(s, socket, p, data, cb) {
     } else {
       const text = clean((data || {}).text, 300);
       if (!text) { if (cb) cb({ error: "Type an answer first." }); return; }
-      given = text; right = fuzzyCorrect(text, q.answer); answered = true;
+      given = text; right = isCorrect(text, q); answered = true;
     }
   }
   p.answers[p.qi] = { given, right };
@@ -442,6 +433,7 @@ io.on("connection", socket => {
           opts,
           correct: opts ? Math.min(Math.max(0, q.correct | 0), opts.length - 1) : null,
           answer: q.answer ? clean(q.answer, 600) : null,
+          rubric: opts ? null : cleanRubric(q.rubric, clean),
           expl: clean(q.expl, 600),
         };
       }).filter(q => q.text && (q.opts || q.answer));

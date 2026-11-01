@@ -113,7 +113,7 @@ function onQuestion(q) {
   } else {
     $("#bars").hidden = true; $("#typedWrap").hidden = false;
     $("#typedList").innerHTML = "";
-    $("#typedNote").textContent = `Typed answer — model: “${q.answer}”. Answers are auto-marked by keyword match.`;
+    $("#typedNote").textContent = `Typed answer — model: “${q.answer}”. Marked forgivingly (case, spacing, brackets and small typos ignored)${q.rubric && q.rubric.keys ? ` — key ideas: ${q.rubric.keys.map(k => k[0]).join(", ")}` : ""}.`;
   }
   startTick(q.endsAt);
 }
@@ -325,6 +325,9 @@ function questionsToText(qs) {
       block += `\nJawapan: ${"ABCDEF"[q.correct || 0]}${q.expl ? ` ${q.expl}` : ""}`;
     } else {
       block += `\nJawapan: ${q.answer || ""}`;
+      const r = q.rubric || {};
+      if (r.accept && r.accept.length) block += `\nTerima: ${r.accept.join(" | ")}`;
+      if (r.keys && r.keys.length) block += `\nKunci (${r.min || 1}): ${r.keys.map(k => k.join("/")).join(", ")}`;
     }
     return block;
   }).join("\n\n");
